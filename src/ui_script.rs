@@ -63,6 +63,9 @@ pub enum DrawCommand {
         font_name: String,
         size: f32,
     },
+    SetTextColor {
+        color: Color,
+    },
     SetTextAlign {
         h_align: HorizontalAlign,
         v_align: VerticalAlign,
@@ -71,9 +74,6 @@ pub enum DrawCommand {
         text: String,
         x: f32,
         y: f32,
-        color: Color,
-        h_align: HorizontalAlign,
-        v_align: VerticalAlign,
     },
     DrawCircle {
         x: f32,
@@ -113,6 +113,9 @@ impl LuaGraphicsContext for LuaGraphics {
             size,
         });
     }
+    fn set_text_color(&mut self, color: Color) {
+        self.commands.push(DrawCommand::SetTextColor { color });
+    }
     fn set_text_align(&mut self, h_align: HorizontalAlign, v_align: VerticalAlign) {
         self.commands
             .push(DrawCommand::SetTextAlign { h_align, v_align });
@@ -122,17 +125,11 @@ impl LuaGraphicsContext for LuaGraphics {
         text: &str,
         x: f32,
         y: f32,
-        color: Color,
-        h_align: HorizontalAlign,
-        v_align: VerticalAlign,
     ) {
         self.commands.push(DrawCommand::DrawText {
             text: text.to_string(),
             x,
             y,
-            color,
-            h_align,
-            v_align,
         });
     }
     fn draw_circle(&mut self, x: f32, y: f32, radius: f32, color: Color) {
@@ -174,6 +171,65 @@ impl mlua::UserData for LuaGraphics {
                 Ok(())
             },
         );
+        methods.add_method_mut(
+            "setFont",
+            |_, this, (font_name, size): (String, f32)| {
+                debug!("setFont called with font_name={}, size={}", font_name, size);
+                this.set_font(&font_name, size);
+                Ok(())
+            },
+        );
+        methods.add_method_mut(
+            "setTextColor",
+            |_, this, color: Color| {
+                debug!("setTextColor called with color=({}, {}, {}, {})", color.r, color.g, color.b, color.a);
+                this.set_text_color(color);
+                Ok(())
+            },
+        );
+        methods.add_method_mut(
+            "setTextAlign",
+            |_, this, (h_align, v_align): (String, String)| {
+                debug!("setTextAlign called with h_align={}, v_align={}", h_align, v_align);
+                let h_align = match h_align.as_str() {
+                    "left" => HorizontalAlign::Left,
+                    "center" => HorizontalAlign::Center,
+                    "right" => HorizontalAlign::Right,
+                    _ => {
+                        return Err(LuaError::FromLuaConversionError {
+                            from: "string",
+                            to: "HorizontalAlign".to_string(),
+                            message: Some(
+                                "expected 'left', 'center', or 'right'".to_string(),
+                            ),
+                        })
+                    }
+                };
+                let v_align = match v_align.as_str() {
+                    "top" => VerticalAlign::Top,
+                    "center" => VerticalAlign::Center,
+                    "bottom" => VerticalAlign::Bottom,
+                    _ => {
+                        return Err(LuaError::FromLuaConversionError {
+                            from: "string",
+                            to: "VerticalAlign".to_string(),
+                            message: Some("expected 'top', 'center', or 'bottom'".to_string()),
+                        })
+                    }
+                };
+                this.set_text_align(h_align, v_align);
+                Ok(())
+            },
+        );
+        methods.add_method_mut(
+            "drawText",
+            |_, this, (text, x, y): (String, f32, f32)| {
+                debug!("drawText called with text='{}', x={}, y={}", text, x, y);
+                this.draw_text(&text, x, y);
+                Ok(())
+            },
+        );
+
     }
 }
 
@@ -181,15 +237,13 @@ pub trait LuaGraphicsContext {
     fn draw_outlined_rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: Color);
     fn draw_filled_rect(&mut self, x: f32, y: f32, width: f32, height: f32, color: Color);
     fn set_font(&mut self, font_name: &str, size: f32);
+    fn set_text_color(&mut self, color: Color);
     fn set_text_align(&mut self, h_align: HorizontalAlign, v_align: VerticalAlign);
     fn draw_text(
         &mut self,
         text: &str,
         x: f32,
         y: f32,
-        color: Color,
-        h_align: HorizontalAlign,
-        v_align: VerticalAlign,
     );
     fn draw_circle(&mut self, x: f32, y: f32, radius: f32, color: Color);
 }

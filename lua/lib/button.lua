@@ -33,11 +33,11 @@ function Button:draw(ctx)
         labelText = self.label
     end
 
-    -- ctx:setFont("Arial", 12)
-    -- ctx:setTextColor(Color.WHITE)
-    -- ctx:setTextAlign("center", "middle")
+    ctx:setFont("CossetteTexte-Regular", 24)
+    ctx:setTextColor(Color.WHITE)
+    ctx:setTextAlign("center", "center")
 
-    -- ctx:drawText(labelText, self.x + self.width / 2, self.y + self.height / 2)
+    ctx:drawText(labelText, self.x + self.width / 2, self.y + self.height / 2)
 end
 
 print("Button class loaded")
