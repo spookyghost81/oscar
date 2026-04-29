@@ -1,0 +1,19 @@
+[package]
+name = "oscar"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+convert_case = "0.11.0"
+image = "0.25.10"
+log = "0.4.29"
+macroquad = "0.4.14"
+mlua = { version = "0.11.6", features = ["serde", "luau", "anyhow", "macros"] }
+rosc = "0.11.4"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+simple_logger = "5.2.0"
+strum = "0.28.0"
+tokio = { version = "1.52.1", features = ["full"] }
+winit = "0.30.13"
