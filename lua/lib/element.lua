@@ -1,11 +1,23 @@
 local class = require 'lib/middleclass'
+local Rect = require 'lib/rect'
 local Element = class('Element')
 
 function Element:initialize(x,y,width,height)
-    self.x = x or 0
-    self.y = y or 0
-    self.width = width or 10
-    self.height = height or 10
+    self.rect = Rect:new(x, y, width, height)
+    self.on_click = nil
+    self.handle_mouse_event = nil
+end
+
+function Element:set_on_click(callback)
+    self.on_click = callback
+end
+
+function Element:set_handle_mouse_event(callback)
+    self.handle_mouse_event = callback
+end
+
+function Element:get_rect()
+    return self.rect
 end
 
 return Element

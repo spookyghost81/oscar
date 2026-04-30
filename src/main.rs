@@ -13,5 +13,6 @@ fn window_conf() -> macroquad::prelude::Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    simple_logger::init_with_level(log::Level::Info).unwrap();
     app::ApplicationState::default().run().await
 }

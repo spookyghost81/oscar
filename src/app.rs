@@ -1,12 +1,14 @@
 use crate::ui_script::{
     DrawCommand, HorizontalAlign, LuaGraphics, LuaRenderer, UiScript, VerticalAlign,
 };
+use anyhow::Context;
 use anyhow::Result;
 use macroquad::prelude::*;
 
 pub struct ApplicationState {
-    ui_script: UiScript,
-
+    ui_script: Result<UiScript>,
+    is_running: bool,
+    error_message: Option<String>,
     current_font: String,
     current_font_size: f32,
     current_text_color: Color,
@@ -16,30 +18,79 @@ pub struct ApplicationState {
 
 impl Default for ApplicationState {
     fn default() -> Self {
-        let ui_script = UiScript::new("basic").unwrap();
+        let ui_script = UiScript::new("basic");
         Self {
             ui_script,
+            error_message: None,
             current_font: "Arial".to_string(),
             current_font_size: 12.0,
             current_text_color: WHITE,
             current_text_align: (HorizontalAlign::Left, VerticalAlign::Top),
             fonts: std::collections::HashMap::new(),
+            is_running: true,
         }
     }
 }
 
 impl ApplicationState {
+    pub fn draw_error(error_message: &str) {
+        let params = TextParams {
+            font: None,
+            font_size: 20,
+            color: RED,
+            ..Default::default()
+        };
+        draw_text_ex(&error_message, 10.0, 30.0, params);
+    }
+
+    pub fn run_script(&mut self) -> Result<()> {
+        let mut graphics = LuaGraphics::new();
+        let ui_script = self
+            .ui_script
+            .as_mut()
+            .map_err(|e| anyhow::anyhow!("Failed to load UI script: {:?}", e))?;
+        ui_script.handle_input()?;
+        ui_script.draw(&mut graphics)?;
+        self.render(&graphics.commands)?;
+
+        Ok(())
+    }
+
     pub async fn run(&mut self) {
         loop {
-            let mut graphics = LuaGraphics::new();
             if is_key_pressed(KeyCode::R) {
-                self.ui_script.reload().unwrap();
+                if let Ok(ui_script) = &mut self.ui_script {
+                    ui_script.reload().unwrap();
+                } else {
+                    self.ui_script = UiScript::new("basic");
+                }
+                self.is_running = true;
+                self.error_message = None;
             }
 
             clear_background(BLACK);
-            self.ui_script.draw(&mut graphics).unwrap();
-            self.render(&graphics.commands).unwrap();
-            self.load_fonts().await.unwrap();
+
+            if self.is_running {
+                match self.run_script() {
+                    Ok(()) => (),
+                    Err(e) => {
+                        let error_message =
+                            format!("Error running UI script: {:?}... Press R to retry.", e);
+
+                        self.error_message = Some(error_message.clone());
+                        log::error!("Error running UI script: {:?}", e);
+                        self.is_running = false;
+
+                        next_frame().await;
+                        continue;
+                    }
+                };
+                self.load_fonts().await.unwrap();
+            }
+
+            if self.error_message.is_some() {
+                Self::draw_error(self.error_message.as_ref().unwrap());
+            }
             next_frame().await
         }
     }
@@ -99,7 +150,6 @@ impl LuaRenderer for ApplicationState {
                 DrawCommand::SetTextAlign { h_align, v_align } => {
                     self.current_text_align = (h_align.clone(), v_align.clone());
                 }
-
                 DrawCommand::DrawCircle {
                     x,
                     y,
