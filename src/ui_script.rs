@@ -1,10 +1,8 @@
 use anyhow::Result;
 use log::debug;
-use macroquad::prelude::*;
 use mlua::Error as LuaError;
+use mlua::LuaSerdeExt;
 use mlua::ObjectLike;
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct Color {
@@ -158,7 +156,7 @@ impl mlua::UserData for LuaGraphics {
         methods.add_method_mut(
             "draw_outlined_rect",
             |_, this, (x, y, width, height, color): (f32, f32, f32, f32, Color)| {
-                debug!("drawOutlinedRect called with x={}, y={}, width={}, height={}, color=({}, {}, {}, {})", 
+                debug!("draw_outlined_rect called with x={}, y={}, width={}, height={}, color=({}, {}, {}, {})", 
                 x, y,
                  width, height, 
                  color.r, color.g, color.b, color.a);
@@ -169,7 +167,7 @@ impl mlua::UserData for LuaGraphics {
         methods.add_method_mut(
             "draw_filled_rect",
             |_, this, (x, y, width, height, color): (f32, f32, f32, f32, Color)| {
-                debug!("drawFilledRect called with x={}, y={}, width={}, height={}, color=({}, {}, {}, {})", x, y, width, height, color.r, color.g, color.b, color.a);
+                debug!("draw_filled_rect called with x={}, y={}, width={}, height={}, color=({}, {}, {}, {})", x, y, width, height, color.r, color.g, color.b, color.a);
                 this.draw_filled_rect(x, y, width, height, color);
                 Ok(())
             },
@@ -177,7 +175,7 @@ impl mlua::UserData for LuaGraphics {
         methods.add_method_mut(
             "set_font",
             |_, this, (font_name, size): (String, f32)| {
-                debug!("setFont called with font_name={}, size={}", font_name, size);
+                debug!("set_font called with font_name={}, size={}", font_name, size);
                 this.set_font(&font_name, size);
                 Ok(())
             },
@@ -185,7 +183,7 @@ impl mlua::UserData for LuaGraphics {
         methods.add_method_mut(
             "set_text_color",
             |_, this, color: Color| {
-                debug!("setTextColor called with color=({}, {}, {}, {})", color.r, color.g, color.b, color.a);
+                debug!("set_text_color called with color=({}, {}, {}, {})", color.r, color.g, color.b, color.a);
                 this.set_text_color(color);
                 Ok(())
             },
@@ -193,7 +191,7 @@ impl mlua::UserData for LuaGraphics {
         methods.add_method_mut(
             "set_text_align",
             |_, this, (h_align, v_align): (String, String)| {
-                debug!("setTextAlign called with h_align={}, v_align={}", h_align, v_align);
+                debug!("set_text_align called with h_align={}, v_align={}", h_align, v_align);
                 let h_align = match h_align.as_str() {
                     "left" => HorizontalAlign::Left,
                     "center" => HorizontalAlign::Center,
@@ -227,8 +225,25 @@ impl mlua::UserData for LuaGraphics {
         methods.add_method_mut(
             "draw_text",
             |_, this, (text, x, y): (String, f32, f32)| {
-                debug!("drawText called with text='{}', x={}, y={}", text, x, y);
+                debug!("draw_text called with text='{}', x={}, y={}", text, x, y);
                 this.draw_text(&text, x, y);
+                Ok(())
+            },
+        );
+        methods.add_method_mut(
+            "draw_circle",
+            |_, this, (x, y, radius, color): (f32, f32, f32, Color)| {
+                debug!(
+                    "draw_circle called with x={}, y={}, radius={}, color=({}, {}, {}, {})",
+                    x,
+                    y,
+                    radius,
+                    color.r,
+                    color.g,
+                    color.b,
+                    color.a
+                );
+                this.draw_circle(x, y, radius, color);
                 Ok(())
             },
         );
@@ -271,20 +286,16 @@ pub struct MouseState {
     pub right_pressed: bool,
 }
 
-impl mlua::UserData for MouseState {
-    fn add_fields<F: mlua::UserDataFields<Self>>(fields: &mut F) {
-        fields.add_field_method_get("x", |_, this| Ok(this.x));
-        fields.add_field_method_get("y", |_, this| Ok(this.y));
-        fields.add_field_method_get("left_down", |_, this| Ok(this.left_down));
-        fields.add_field_method_get("left_pressed", |_, this| Ok(this.left_pressed));
-        fields.add_field_method_get("right_down", |_, this| Ok(this.right_down));
-        fields.add_field_method_get("right_pressed", |_, this| Ok(this.right_pressed));
-    }
-}
-
-pub struct OscarState {
-    pub mouse: MouseState
-}
+// impl mlua::UserData for MouseState {
+//     fn add_fields<F: mlua::UserDataFields<Self>>(fields: &mut F) {
+//         fields.add_field_method_get("x", |_, this| Ok(this.x));
+//         fields.add_field_method_get("y", |_, this| Ok(this.y));
+//         fields.add_field_method_get("left_down", |_, this| Ok(this.left_down));
+//         fields.add_field_method_get("left_pressed", |_, this| Ok(this.left_pressed));
+//         fields.add_field_method_get("right_down", |_, this| Ok(this.right_down));
+//         fields.add_field_method_get("right_pressed", |_, this| Ok(this.right_pressed));
+//     }
+// }
 
 impl UiScript {
     pub fn new(filename: &str) -> Result<Self> {
@@ -328,18 +339,24 @@ impl UiScript {
         Ok(())
     }
 
-    pub fn handle_input(&mut self) -> Result<()> {
-        let (mouse_x, mouse_y) = mouse_position();
+    pub fn update_input(
+        &mut self, 
+        mouse_x: f32, 
+        mouse_y: f32, 
+        left_pressed: bool, 
+        right_pressed: bool, 
+        left_down: bool, 
+        right_down: bool) -> Result<()> {
         let mouse_state = MouseState {
             x: mouse_x,
             y: mouse_y,
-            left_down: is_mouse_button_down(macroquad::prelude::MouseButton::Left),
-            left_pressed: is_mouse_button_pressed(macroquad::prelude::MouseButton::Left),
-            right_down: is_mouse_button_down(macroquad::prelude::MouseButton::Right),
-            right_pressed: is_mouse_button_pressed(macroquad::prelude::MouseButton::Right),
+            left_down,
+            left_pressed,
+            right_down,
+            right_pressed,
         };
         
-        let mouse_state = self.lua.create_userdata(mouse_state)?;
+        let mouse_state = self.lua.to_value(&mouse_state)?;
         self.loaded_page.call_method::<()>("update_mouse_state", mouse_state)?;
         
         Ok(())
