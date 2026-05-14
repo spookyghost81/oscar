@@ -130,7 +130,7 @@ end
 
 local page = DefaultPage:new()
 
-page["_AUTHOR"] = "Oscar"
+page["_AUTHOR"] = "Oscar Basic 8-Channel Controller"
 page["_URL"] = "https://example.com"
 
 return page

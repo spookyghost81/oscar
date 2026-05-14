@@ -16,6 +16,7 @@ function Page:draw(ctx)
     end
 
     --draw prev mouse state
+    ctx:set_text_align("left", "bottom");
     ctx:draw_text("Mouse State: " .. (self.previous_mouse_state and ("x: " .. self.previous_mouse_state.x .. ", y: " .. self.previous_mouse_state.y .. ", left_pressed: " .. tostring(self.previous_mouse_state.left_pressed) .. ", right_pressed: " .. tostring(self.previous_mouse_state.right_pressed)) or "nil"), 10, self.height - 30)
 end
 
