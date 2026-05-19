@@ -1,27 +1,22 @@
 local class = require 'lib/middleclass'
 local Color = require 'lib/color'
-local Page = class('Page')
+local Element = require 'lib/element'
+local Page = class('Page', Element)
 
-function Page:initialize(width, height)
-    self.width = width or 800
-    self.height = height or 600
-    self.elements = {}
+function Page:initialize(x, y, width, height)
+    Element.initialize(self, x or 0, y or 0, width or 800, height or 600)
+    self.children = {}
     self.previous_mouse_state = nil
 end
 
 function Page:draw(ctx)
-    ctx:draw_filled_rect(0, 0, self.width, self.height, Color.BLACK)
-    for _, element in ipairs(self.elements) do
+    for _, element in ipairs(self.children) do
         element:draw(ctx)
-    end
-
-    --draw prev mouse state
-    ctx:set_text_align("left", "bottom");
-    ctx:draw_text("Mouse State: " .. (self.previous_mouse_state and ("x: " .. self.previous_mouse_state.x .. ", y: " .. self.previous_mouse_state.y .. ", left_pressed: " .. tostring(self.previous_mouse_state.left_pressed) .. ", right_pressed: " .. tostring(self.previous_mouse_state.right_pressed)) or "nil"), 10, self.height - 30)
+    end    
 end
 
 function Page:update(dt)
-    for _, element in ipairs(self.elements) do
+    for _, element in ipairs(self.children) do
         if element.update then
             element:update(dt)
         end
@@ -37,28 +32,33 @@ function Page:update_mouse_state(mouse_state)
     local right_down = mouse_state.right_down
 
     -- print("Mouse event at: " .. tostring(x) .. ", " .. tostring(y) .. ", left_pressed: " .. tostring(left_pressed) .. ", right_pressed: " .. tostring(right_pressed))
-    for _, element in ipairs(self.elements) do      
+    
+    if left_pressed then
+        self:handle_mouse_event({type = "primary_down", x = x, y = y})
+    elseif left_down then
+        self:handle_mouse_event({type = "primary_drag", x = x, y = y})
+    elseif not left_down and self.previous_mouse_state and self.previous_mouse_state.left_down then
+        self:handle_mouse_event({type = "primary_up", x = x, y = y})
+    elseif right_pressed then
+        self:handle_mouse_event({type = "secondary_down", x = x, y = y})
+    elseif right_down then
+        self:handle_mouse_event({type = "secondary_drag", x = x, y = y})
+    elseif not right_down and self.previous_mouse_state and self.previous_mouse_state.right_down then
+        self:handle_mouse_event({type = "secondary_up", x = x, y = y})
+    else 
+        self:handle_mouse_event({type = "move", x = x, y = y})
+    end             
+    
+    self.previous_mouse_state = mouse_state
+end
+
+function Page:handle_mouse_event(event)
+     for _, element in ipairs(self.children) do   
         local rect = element:get_rect()
-        if rect:contains_point(x, y) and element.handle_mouse_event ~= nil then
-            if left_pressed then
-                element:handle_mouse_event({type = "primary_down", x = x, y = y})
-            elseif left_down then
-                element:handle_mouse_event({type = "primary_drag", x = x, y = y})
-            elseif not left_down and self.previous_mouse_state and self.previous_mouse_state.left_down then
-                element:handle_mouse_event({type = "primary_up", x = x, y = y})
-            elseif right_pressed then
-                element:handle_mouse_event({type = "secondary_down", x = x, y = y})
-            elseif right_down then
-                element:handle_mouse_event({type = "secondary_drag", x = x, y = y})
-            elseif not right_down and self.previous_mouse_state and self.previous_mouse_state.right_down then
-                element:handle_mouse_event({type = "secondary_up", x = x, y = y})
-            else 
-                element:handle_mouse_event({type = "move", x = x, y = y})
-            end             
+        if rect:contains_point(event.x, event.y) and element.handle_mouse_event ~= nil then
+            element:handle_mouse_event(event)
         end
     end
-
-    self.previous_mouse_state = mouse_state
 end
 
 return Page

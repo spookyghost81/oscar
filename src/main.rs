@@ -17,7 +17,7 @@ pub fn run() -> anyhow::Result<()> {
     simple_logger::init_with_level(log::Level::Info).unwrap();
     let event_loop = EventLoop::with_user_event().build()?;
     let mut app = app::App::new();
-    event_loop.run_app(&mut app);
+    event_loop.run_app(&mut app)?;
     Ok(())
 }
 

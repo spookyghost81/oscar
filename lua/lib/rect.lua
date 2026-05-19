@@ -105,12 +105,28 @@ function Rect:contains_point(x,y)
            y >= self:get_top() and y <= self:get_bottom()
 end
 
-function Rect:get_local_x(x)
+function Rect:world_to_local(x, y)
+    return {self:world_to_local_x(x), self:world_to_local_y(y)}
+end
+
+function Rect:world_to_local_x(x)
     return (x - self:get_left()) / self:get_width()
 end
 
-function Rect:get_local_y(y)
+function Rect:world_to_local_y(y)
     return (y - self:get_top()) / self:get_height()
+end
+
+function Rect:local_to_world(x, y)
+    return {self:local_to_world_x(x), self:local_to_world_y(y)}
+end
+
+function Rect:local_to_world_x(local_x)
+    return self:get_left() + local_x * self:get_width()
+end
+
+function Rect:local_to_world_y(local_y)
+    return self:get_top() + local_y * self:get_height()
 end
 
 function Rect:contracted(amount)

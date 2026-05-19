@@ -1,8 +1,13 @@
+use anyhow::Context;
 use anyhow::Result;
 use log::debug;
 use mlua::Error as LuaError;
 use mlua::LuaSerdeExt;
 use mlua::ObjectLike;
+
+use crate::daw_control::DawControlMessage;
+use crate::daw_control::DawState;
+use crate::daw_control::TrackControl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct Color {
@@ -273,7 +278,61 @@ pub trait LuaRenderer {
 pub struct UiScript {
     pub filename: String,
     pub lua: mlua::Lua,
+    pub global_state: GlobalScriptState,
     pub loaded_page: mlua::Table,
+}
+
+#[derive(Debug, Clone)]
+pub struct GlobalScriptState {
+    pub window_size: (f32, f32),
+    pub daw: DawState,
+    pub tx: std::sync::mpsc::Sender<DawControlMessage>,
+}
+
+impl mlua::UserData for GlobalScriptState {
+    fn add_fields<F: mlua::UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("window_size", |lua, this| lua.to_value(&this.window_size).map_err(|e| LuaError::external(e)));
+        fields.add_field_method_get("window_width", |_, this| Ok(this.window_size.0));
+        fields.add_field_method_get("window_height", |_, this| Ok(this.window_size.1));
+        fields.add_field_method_get("daw", |lua, this| Ok(
+            lua.to_value(&this.daw).unwrap()
+        ));
+    }
+
+    fn add_methods<M: mlua::prelude::LuaUserDataMethods<Self>>(methods: &mut M) {
+        methods.add_method("track_control", |_lua, this: &GlobalScriptState, (track_index, control_type, value): (usize, String, mlua::Value)| {
+            if track_index == 0 || track_index > this.daw.tracks.len() {
+                return Err(LuaError::FromLuaConversionError {
+                    from: "number",
+                    to: "valid track index".to_string(),
+                    message: Some(format!("track index {} is out of bounds", track_index)),
+                })
+            }
+
+            let value:f32 = match value {
+                mlua::Value::Boolean(b) => if b { 1.0 } else { 0.0 },
+                mlua::Value::Integer(i) => i as f32,
+                mlua::Value::Number(n) => n as f32,
+                other => {
+                    return Err(LuaError::FromLuaConversionError {
+                        from: other.type_name(),
+                        to: "number or boolean".to_string(),
+                        message: Some("expected a number or boolean value".to_string()),
+                    })
+                }
+            };
+
+            let control = DawControlMessage::track_control(track_index, &control_type, value)?;
+            this.tx.send(control).unwrap();
+            log::debug!("Received track message for track {} {} {:?}", track_index, control_type, value);
+            Ok(())
+        });
+
+        methods.add_method("playback_control", |lua, this: &GlobalScriptState, (control_type, value): (String, mlua::Value)| {
+            log::debug!("Received playback message {} {:?}", control_type, value);
+            Ok(())
+        });
+    }
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
@@ -286,20 +345,9 @@ pub struct MouseState {
     pub right_pressed: bool,
 }
 
-// impl mlua::UserData for MouseState {
-//     fn add_fields<F: mlua::UserDataFields<Self>>(fields: &mut F) {
-//         fields.add_field_method_get("x", |_, this| Ok(this.x));
-//         fields.add_field_method_get("y", |_, this| Ok(this.y));
-//         fields.add_field_method_get("left_down", |_, this| Ok(this.left_down));
-//         fields.add_field_method_get("left_pressed", |_, this| Ok(this.left_pressed));
-//         fields.add_field_method_get("right_down", |_, this| Ok(this.right_down));
-//         fields.add_field_method_get("right_pressed", |_, this| Ok(this.right_pressed));
-//     }
-// }
-
 impl UiScript {
-    pub fn new(filename: &str) -> Result<Self> {
-            let lua = mlua::Lua::new();
+    pub fn new(filename: &str, tx: std::sync::mpsc::Sender<DawControlMessage>) -> Result<Self> {
+        let lua = mlua::Lua::new();
 
         let require = lua
             .create_function(|lua, module: String| {
@@ -311,12 +359,19 @@ impl UiScript {
         })
         .unwrap();
         lua.globals().set("require", require).unwrap();
+        let global_state = GlobalScriptState {
+            window_size: (1024.0, 768.0),
+            daw: DawState::default(),
+            tx
+        };
+        Self::push_global_state_internal(&lua, &global_state).context("Failed to update global state")?;
         let loaded_page = lua
             .load(std::path::Path::new(&format!("lua/{}.lua", filename)))
-            .eval::<mlua::Table>()?;
+            .eval::<mlua::Table>().context("Failed to load Lua UI script")?;
         Ok(Self {
             filename: filename.to_string(),
             lua,
+            global_state,
             loaded_page,
         })
     }
@@ -330,12 +385,38 @@ impl UiScript {
         Ok(())
     }
 
+    pub fn update(&mut self, dt: f32) -> Result<()> {
+        self.lua.scope(|scope| {
+            self.loaded_page.call_method::<()>("update", dt)?;
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     pub fn draw(&mut self, graphics: &mut LuaGraphics) -> Result<()> {
         self.lua.scope(|scope| {
             let userdata = scope.create_userdata_ref_mut(graphics)?;
             self.loaded_page.call_method::<()>("draw", userdata)?;
             Ok(())
         })?;
+        Ok(())
+    }
+
+    pub fn global_state(&self) -> &GlobalScriptState {
+        &self.global_state
+    }
+
+    pub fn global_state_mut(&mut self) -> &mut GlobalScriptState {
+        &mut self.global_state
+    }
+
+    pub fn push_global_state(&mut self) -> Result<()> {
+        Self::push_global_state_internal(&self.lua, &self.global_state)
+    }
+
+    fn push_global_state_internal(lua: &mlua::Lua, global_state: &GlobalScriptState) -> Result<()> {
+        let state = lua.create_userdata(global_state.clone())?;
+        lua.globals().set("oscar", state)?;
         Ok(())
     }
 

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::daw_control::{self, DawControlMessage, DawState};
 use crate::ui_script::{Color, DrawCommand, HorizontalAlign, LuaGraphics, UiScript, VerticalAlign};
 use anyhow::{Context, Result};
 use egui_wgpu::{Renderer as EpaintRenderer, ScreenDescriptor};
@@ -9,6 +10,7 @@ use epaint::{
     ClippedShape, Color32, CornerRadius, Rect, Shape, Stroke, StrokeKind, TessellationOptions,
     Tessellator, TextureId, pos2, vec2,
 };
+use rosc::OscMessage;
 use winit::dpi::PhysicalSize;
 use winit::{
     application::ApplicationHandler,
@@ -19,6 +21,7 @@ use winit::{
 };
 
 pub struct ApplicationState {
+    pub window_size: (f32, f32),
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub surface_config: wgpu::SurfaceConfiguration,
@@ -32,6 +35,9 @@ pub struct ApplicationState {
     pub mouse_buttons: [bool; 5],
     pub mouse_buttons_pressed: [bool; 5],
 
+    receiver: std::sync::mpsc::Receiver<OscMessage>,
+    sender: std::sync::mpsc::Sender<DawControlMessage>,
+
     ui_script: Result<UiScript>,
 }
 
@@ -42,6 +48,8 @@ impl ApplicationState {
         window: &Window,
         width: u32,
         height: u32,
+        receiver: std::sync::mpsc::Receiver<OscMessage>,
+        sender: std::sync::mpsc::Sender<DawControlMessage>,
     ) -> Self {
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -87,8 +95,9 @@ impl ApplicationState {
         let text_options = TextOptions::default();
         let fonts = Fonts::new(text_options.clone(), FontDefinitions::default());
         let painter = EpaintRenderer::new(&device, surface_config.format, Default::default());
-
+        let sender2 = sender.clone();
         Self {
+            window_size: (width as f32, height as f32),
             device,
             queue,
             surface_config,
@@ -100,13 +109,16 @@ impl ApplicationState {
             mouse_position: (0.0, 0.0),
             mouse_buttons: [false; 5],
             mouse_buttons_pressed: [false; 5],
-            ui_script: UiScript::new("basic"),
+            receiver,
+            sender,
+            ui_script: UiScript::new("basic", sender2),
         }
     }
 
     fn resize_surface(&mut self, width: u32, height: u32) {
         self.surface_config.width = width;
         self.surface_config.height = height;
+        self.window_size = (width as f32, height as f32);
         self.surface.configure(&self.device, &self.surface_config);
     }
 
@@ -278,6 +290,7 @@ impl ApplicationState {
                 )
                 .and_then(|_| {
                     self.mouse_buttons_pressed = [false; 5];
+                    ui_script.update(1.0 / 60.0)?;
                     ui_script.draw(&mut graphics)
                 })
             {
@@ -328,6 +341,25 @@ impl App {
         }
     }
 
+    pub fn handle_messages(&mut self) {
+        if let Some(state) = self.state.as_mut() {
+            while let Ok(msg) = state.receiver.try_recv() {
+                let _ = state.ui_script.as_mut().map(|ui_script| {
+                    ui_script
+                        .global_state_mut()
+                        .daw
+                        .update_from_osc_message(msg);
+                });
+            }
+            let res = state.ui_script.as_mut().map(|ui_script| {
+                ui_script.push_global_state().unwrap();
+            });
+            if res.is_err() {
+                log::error!("Failed to push global state to UI script: {:?}", res.err());
+            }
+        }
+    }
+
     async fn set_window(&mut self, window: Window) {
         let window = Arc::new(window);
         let initial_width = 1024;
@@ -337,13 +369,25 @@ impl App {
             .instance
             .create_surface(window.clone())
             .expect("Unable to create surface");
-
+        let (incoming_packet_sender, incoming_packet_receiver) = std::sync::mpsc::channel();
+        let (outgoing_packet_sender, outgoing_packet_receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            match daw_control::network_thread(incoming_packet_sender, outgoing_packet_receiver) {
+                Ok(()) => log::info!("Network thread exited successfully"),
+                Err(e) => {
+                    log::error!("Network thread exited with error: {:?}", e);
+                    panic!("Network thread exited with error: {:?}", e);
+                }
+            }
+        });
         let state = ApplicationState::new(
             &self.instance,
             surface,
             &window,
             initial_width,
             initial_height,
+            incoming_packet_receiver,
+            outgoing_packet_sender,
         )
         .await;
 
@@ -356,12 +400,19 @@ impl App {
             log::info!("Escape key pressed. Exiting application.");
             std::process::exit(0);
         }
+        if let (KeyCode::KeyR, true) = (key_code, is_pressed) {
+            log::info!("R key pressed. Reloading UI script.");
+            if let Some(state) = self.state.as_mut() {
+                state.ui_script = UiScript::new("basic", state.sender.clone());
+            }
+        }
     }
 
     fn handle_resized(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
             if let Some(state) = self.state.as_mut() {
                 state.resize_surface(width, height);
+                state.window_size = (width as f32, height as f32);
             }
         }
     }
@@ -374,6 +425,14 @@ impl App {
             }
         }
 
+        if let Some(state) = self.state.as_mut() {
+            let _ = state
+                .ui_script
+                .as_mut()
+                .map(|ui_script| ui_script.global_state_mut().window_size = state.window_size);
+        }
+
+        self.handle_messages();
         let state = self
             .state
             .as_mut()
