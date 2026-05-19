@@ -1,6 +1,6 @@
-# OSCar
+# oscar
 
-OSCar is an OSC-based DAW controller app written in Rust with a Lua-scriptable UI layout system.
+oscar is an OSC-based DAW controller app written in Rust with a Lua-scriptable UI layout system.
 
 It uses:
 
